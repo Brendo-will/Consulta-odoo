@@ -26,7 +26,7 @@ def logar_no_odoo(url, db, usuario, senha):
         st.error(f"Erro ao autenticar no Odoo: {str(e)}")
         return None, None
 
-def buscar_movimentacoes(uid, models, db, senha, domain, fields):
+def buscar_movimentacoes(uid, models, db, senha, modelo, domain, fields):
     try:
         offset = 0
         limit = 1000
@@ -36,7 +36,7 @@ def buscar_movimentacoes(uid, models, db, senha, domain, fields):
         while True:
             lote = models.execute_kw(
                 db, uid, senha,
-                'dossie.dossie', 'search_read',
+                modelo, 'search_read',
                 [domain], {'fields': fields, 'offset': offset, 'limit': limit}
             )
             if not lote:
@@ -55,7 +55,6 @@ def buscar_movimentacoes(uid, models, db, senha, domain, fields):
         st.exception(e)
         return []
 
-
 def normalizar_registros(registros):
     """Converte campos many2one e many2many para strings legíveis."""
     for registro in registros:
@@ -71,11 +70,9 @@ def normalizar_registros(registros):
 
             # Trata Many2many como lista de IDs (ex: [1, 2, 3])
             elif isinstance(valor, list) and all(isinstance(v, int) for v in valor):
-                # Aqui você pode deixar como string com IDs separados, ou colocar "IDs: 1,2,3"
                 registro[chave] = ", ".join(str(v) for v in valor)
 
     return registros
-
 
 def get_download_folder():
     if os.name == 'nt':  # Windows
@@ -92,14 +89,12 @@ def salvar_excel(registros):
     df.to_excel(excel_path, index=False)
     return excel_path, df
 
-
-
 # ------------------------------
 # Streamlit Interface
 # ------------------------------
 
-st.set_page_config(page_title="Exportador de Dossiês Personalizado", layout="wide")
-st.title("🔐 Exportador de Dossiês -")
+st.set_page_config(page_title="Exportador Personalizado Odoo", layout="wide")
+st.title("🔐 Exportador Personalizado Odoo -")
 
 with st.form("form_config"):
     st.subheader("🔧 Configurações de Conexão")
@@ -107,6 +102,9 @@ with st.form("form_config"):
     db = st.text_input("Banco de Dados", value="mmp.intelligenti.com.br")
     usuario = st.text_input("Usuário", placeholder="Digite seu login do Odoo")
     senha = st.text_input("Senha", type="password")
+
+    st.subheader("📄 Modelo a Consultar")
+    modelo_input = st.text_input("Modelo (ex: dossie.dossie)", value="dossie.dossie")
 
     st.subheader("📌 Parâmetros da Consulta")
     domain_input = st.text_area("Filtro", value='[["estado_cliente", "=", "a"]]')
@@ -128,7 +126,7 @@ if submitted:
 
     if uid:
         with st.spinner("🔍 Buscando Casos..."):
-            registros = buscar_movimentacoes(uid, models, db, senha, domain, fields)
+            registros = buscar_movimentacoes(uid, models, db, senha, modelo_input, domain, fields)
 
         if registros:
             caminho_excel, df = salvar_excel(registros)
@@ -136,6 +134,6 @@ if submitted:
             st.dataframe(df.head())
 
             with open(caminho_excel, "rb") as f:
-                st.download_button("📥 Baixar Excel", f, file_name="Karol_dossie.xlsx")
+                st.download_button("📥 Baixar Excel", f, file_name="Extracao.xlsx")
         else:
             st.warning("⚠️ Nenhum registro encontrado.")
