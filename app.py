@@ -65,11 +65,17 @@ def normalizar_registros(registros):
                 registro[chave] = valor[1]
 
             # Trata Many2many: [[id, "nome"], [id, "nome2"], ...]
-            elif isinstance(valor, list) and all(isinstance(v, list) and len(v) == 2 for v in valor):
-                nomes = [v[1] for v in valor if isinstance(v[1], str)]
+            elif isinstance(valor, list) and all(isinstance(v, list) and len(v) == 2 and isinstance(v[1], str) for v in valor):
+                nomes = [v[1] for v in valor]
                 registro[chave] = ", ".join(nomes)
 
+            # Trata Many2many como lista de IDs (ex: [1, 2, 3])
+            elif isinstance(valor, list) and all(isinstance(v, int) for v in valor):
+                # Aqui você pode deixar como string com IDs separados, ou colocar "IDs: 1,2,3"
+                registro[chave] = ", ".join(str(v) for v in valor)
+
     return registros
+
 
 def get_download_folder():
     if os.name == 'nt':  # Windows
