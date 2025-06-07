@@ -103,16 +103,15 @@ def get_download_folder():
         download_folder = os.path.join(os.environ['HOME'], 'Downloads')
     return download_folder
 
-def salvar_excel(registros):
-    registros = normalizar_registros(registros)
+def salvar_excel(registros, models, db, uid, senha):
+    registros = normalizar_registros(registros, models, db, uid, senha)
     df = pd.DataFrame(registros)
-    
-    # Se estiver rodando no Streamlit Cloud, salva na pasta atual (.)
-    # Isso funciona tanto local quanto no Cloud
+
     excel_path = "Extracao.xlsx"
-    
+
     df.to_excel(excel_path, index=False)
     return excel_path, df
+
 
 
 # ------------------------------
@@ -155,7 +154,7 @@ if submitted:
             registros = buscar_movimentacoes(uid, models, db, senha, modelo_input, domain, fields)
 
         if registros:
-            caminho_excel, df = salvar_excel(registros)
+            caminho_excel, df = salvar_excel(registros, models, db, uid, senha)
             st.success(f"✅ {len(df)} registros exportados com sucesso!")
             st.dataframe(df.head())
 
