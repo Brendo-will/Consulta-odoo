@@ -84,10 +84,14 @@ def get_download_folder():
 def salvar_excel(registros):
     registros = normalizar_registros(registros)
     df = pd.DataFrame(registros)
-    download_folder = get_download_folder()
-    excel_path = os.path.join(download_folder, "Extracao.xlsx")
+    
+    # Se estiver rodando no Streamlit Cloud, salva na pasta atual (.)
+    # Isso funciona tanto local quanto no Cloud
+    excel_path = "Extracao.xlsx"
+    
     df.to_excel(excel_path, index=False)
     return excel_path, df
+
 
 # ------------------------------
 # Streamlit Interface
@@ -135,5 +139,6 @@ if submitted:
 
             with open(caminho_excel, "rb") as f:
                 st.download_button("📥 Baixar Excel", f, file_name="Extracao.xlsx")
+
         else:
             st.warning("⚠️ Nenhum registro encontrado.")
