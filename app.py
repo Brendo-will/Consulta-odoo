@@ -71,10 +71,18 @@ def normalizar_registros(registros):
 
     return registros
 
+def get_download_folder():
+    if os.name == 'nt':  # Windows
+        download_folder = os.path.join(os.environ['USERPROFILE'], 'Downloads')
+    else:  # Linux/Mac
+        download_folder = os.path.join(os.environ['HOME'], 'Downloads')
+    return download_folder
+
 def salvar_excel(registros):
     registros = normalizar_registros(registros)
     df = pd.DataFrame(registros)
-    excel_path = os.path.join(path_down, "Karol_dossie.xlsx")
+    download_folder = get_download_folder()
+    excel_path = os.path.join(download_folder, "Extracao.xlsx")
     df.to_excel(excel_path, index=False)
     return excel_path, df
 
