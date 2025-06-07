@@ -55,22 +55,44 @@ def buscar_movimentacoes(uid, models, db, senha, modelo, domain, fields):
         st.exception(e)
         return []
 
-def normalizar_registros(registros):
-    """Converte campos many2one e many2many para strings legíveis."""
+def normalizar_registros(registros, models, db, uid, senha):
+    """Converte campos many2one e many2many para strings legíveis.
+    Para campos de partner_ids, busca o name em res.partner.
+    """
+    campos_partner = [
+        'parte_contraria_ids',
+        'parte_representada_ids',
+        'advogado_adverso_ids'
+    ]
+
     for registro in registros:
         for chave, valor in registro.items():
             # Trata Many2one: [id, "nome"]
             if isinstance(valor, list) and len(valor) == 2 and isinstance(valor[0], int) and isinstance(valor[1], str):
                 registro[chave] = valor[1]
 
-            # Trata Many2many: [[id, "nome"], [id, "nome2"], ...]
+            # Trata Many2many como lista de [[id, "nome"]]
             elif isinstance(valor, list) and all(isinstance(v, list) and len(v) == 2 and isinstance(v[1], str) for v in valor):
                 nomes = [v[1] for v in valor]
                 registro[chave] = ", ".join(nomes)
 
             # Trata Many2many como lista de IDs (ex: [1, 2, 3])
             elif isinstance(valor, list) and all(isinstance(v, int) for v in valor):
-                registro[chave] = ", ".join(str(v) for v in valor)
+                if chave in campos_partner:
+                    # buscar names no res.partner
+                    partner_nomes = models.execute_kw(
+                        db, uid, senha,
+                        'res.partner', 'read',
+                        [valor], {'fields': ['name']}
+                    )
+                    nomes = [p['name'] for p in partner_nomes]
+                    registro[chave] = ", ".join(nomes)
+                else:
+                    # default: lista de IDs como string
+                    registro[chave] = ", ".join(str(v) for v in valor)
+
+    return registros
+
 
     return registros
 
