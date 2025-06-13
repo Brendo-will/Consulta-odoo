@@ -29,7 +29,7 @@ def logar_no_odoo(url, db, usuario, senha):
 def buscar_movimentacoes(uid, models, db, senha, modelo, domain, fields):
     try:
         offset = 0
-        limit = 1000
+        limit = 4000
         todos_registros = []
         progresso = st.empty()  # espaço dinâmico para exibir progresso
 
