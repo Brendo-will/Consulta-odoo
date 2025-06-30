@@ -12,6 +12,34 @@ from dotenv import load_dotenv
 load_dotenv()
 path_down = os.getenv("CAMINHO_DOWNLOAD") or "."
 
+FILTROS_SALVOS_PATH = "filtros_salvos.json"
+
+# ---------------- Funções auxiliares ---------------- #
+def carregar_filtros_salvos():
+    if os.path.exists(FILTROS_SALVOS_PATH):
+        with open(FILTROS_SALVOS_PATH, "r") as f:
+            return json.load(f)
+    return {}
+
+def salvar_filtro(nome_filtro, domain, fields):
+    filtros = carregar_filtros_salvos()
+    filtros[nome_filtro] = {"domain": domain, "fields": fields}
+    with open(FILTROS_SALVOS_PATH, "w") as f:
+        json.dump(filtros, f, indent=4)
+
+def corrigir_entrada_json(texto):
+    try:
+        return json.loads(texto)
+    except json.JSONDecodeError:
+        try:
+            texto_corrigido = texto.replace("'", '"')
+            return json.loads(texto_corrigido)
+        except:
+            try:
+                return ast.literal_eval(texto)
+            except:
+                return None
+
 def logar_no_odoo(url, db, usuario, senha):
     try:
         common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common")
@@ -79,7 +107,7 @@ def normalizar_registros(registros, models, db, uid, senha):
 
     for registro in registros:
         for chave, valor in registro.items():
-            if isinstance(valor, list) and len(valor) == 2 and isinstance(valor[0], int) and isinstance(valor[1], str):
+            if isinstance(valor, list) and len(valor) == 2 and isinstance(valor[0], int):
                 registro[chave] = valor[1]
             elif isinstance(valor, list) and all(isinstance(v, list) and len(v) == 2 for v in valor):
                 nomes = [v[1] for v in valor]
@@ -100,47 +128,88 @@ def salvar_excel(registros, models, db, uid, senha):
     df.to_excel(excel_path, index=False)
     return excel_path, df
 
-def get_download_folder():
-    if os.name == 'nt':
-        return os.path.join(os.environ['USERPROFILE'], 'Downloads')
-    else:
-        return os.path.join(os.environ['HOME'], 'Downloads')
+def excluir_filtro(nome_filtro):
+    filtros = carregar_filtros_salvos()
+    if nome_filtro in filtros:
+        del filtros[nome_filtro]
+        with open(FILTROS_SALVOS_PATH, "w") as f:
+            json.dump(filtros, f, indent=4)
 
-def corrigir_entrada_json(texto):
-    try:
-        return json.loads(texto)
-    except json.JSONDecodeError:
-        try:
-            texto_corrigido = texto.replace("'", '"')
-            return json.loads(texto_corrigido)
-        except:
-            try:
-                return ast.literal_eval(texto)
-            except:
-                return None
+# ---------------- Estado Inicial ---------------- #
+if "domain_input" not in st.session_state:
+    st.session_state["domain_input"] = '[["estado_cliente", "=", "a"]]'
+if "fields_input" not in st.session_state:
+    st.session_state["fields_input"] = '["dossie_id", "processo", "fase_id"]'
 
+# --- Carregar filtros salvos e aplicar se necessário --- #
+filtros_disponiveis = carregar_filtros_salvos()
+
+if st.session_state.get("aplicar_filtro", False):
+    filtro_aplicado = st.session_state.get("filtro_selecionado")
+    if filtro_aplicado in filtros_disponiveis:
+        st.session_state["domain_input"] = filtros_disponiveis[filtro_aplicado]["domain"]
+        st.session_state["fields_input"] = filtros_disponiveis[filtro_aplicado]["fields"]
+    st.session_state["aplicar_filtro"] = False
+
+# ---------------- Layout ---------------- #
 st.set_page_config(page_title="Exportador Personalizado Odoo", layout="wide")
-st.title("🔐 Exportador Personalizado Odoo -")
+st.title("🔐 Exportador Personalizado Odoo")
 
 with st.form("form_config"):
     st.subheader("🔧 Configurações de Conexão")
-    url = st.text_input("URL do Odoo", value="https://mmp.intelligenti.com.br")
-    db = st.text_input("Banco de Dados", value="mmp.intelligenti.com.br")
-    usuario = st.text_input("Usuário", placeholder="Digite seu login do Odoo")
-    senha = st.text_input("Senha", type="password")
+    col1, col2 = st.columns(2)
+    with col1:
+        url = st.text_input("URL do Odoo", value="https://mmp.intelligenti.com.br")
+        db = st.text_input("Banco de Dados", value="mmp.intelligenti.com.br")
+    with col2:
+        usuario = st.text_input("Usuário")
+        senha = st.text_input("Senha", type="password")
 
     st.subheader("📄 Modelo a Consultar")
     modelo_input = st.text_input("Modelo (ex: dossie.dossie)", value="dossie.dossie")
 
-    st.subheader("📌 Parâmetros da Consulta")
-    domain_input = st.text_area("Filtro", value='[["estado_cliente", "=", "a"]]')
-    fields_input = st.text_area("Campos", value='["dossie_id", "processo", "fase_id"]')
+    with st.expander("📌 Parâmetros da Consulta"):
+        domain_input = st.text_area("Filtro", value=st.session_state["domain_input"], key="domain_input")
+        fields_input = st.text_area("Campos", value=st.session_state["fields_input"], key="fields_input")
 
-    submitted = st.form_submit_button("🔄 Conectar e Buscar Dados")
+    st.subheader("💾 Gerenciar Filtros Salvos")
+    nome_filtro = st.text_input("Nome do Filtro para Salvar")
 
-if submitted:
-    domain = corrigir_entrada_json(domain_input)
-    fields = corrigir_entrada_json(fields_input)
+    col3, col4 = st.columns([1, 1])
+    with col3:
+        if st.form_submit_button("🔄 Conectar e Buscar Dados"):
+            processar = True
+        else:
+            processar = False
+    with col4:
+        if nome_filtro and st.form_submit_button("💾 Salvar Filtro Atual"):
+            salvar_filtro(nome_filtro, domain_input, fields_input)
+            st.success(f"Filtro '{nome_filtro}' salvo com sucesso!")
+
+    if filtros_disponiveis:
+        filtro_selecionado = st.selectbox("📂 Carregar Filtro Salvo", list(filtros_disponiveis.keys()))
+        col_del, col_apl = st.columns([1, 1])
+
+        with col_del:
+            if st.form_submit_button("🗑️ Excluir Filtro Selecionado"):
+                excluir_filtro(filtro_selecionado)
+                st.success(f"Filtro '{filtro_selecionado}' excluído com sucesso!")
+                st.rerun()
+
+        with col_apl:
+            if st.form_submit_button("📌 Aplicar Filtro"):
+                st.session_state["filtro_selecionado"] = filtro_selecionado
+                st.session_state["aplicar_filtro"] = True
+                st.rerun()
+
+
+# ---------------- Execução ---------------- #
+if "processar" not in locals():
+    processar = False
+
+if processar:
+    domain = corrigir_entrada_json(st.session_state["domain_input"])
+    fields = corrigir_entrada_json(st.session_state["fields_input"])
 
     if domain is None or fields is None:
         st.error("❌ Erro ao interpretar domain ou fields. Verifique se estão em formato JSON.")
@@ -156,9 +225,10 @@ if submitted:
         if registros:
             caminho_excel, df = salvar_excel(registros, models, db, uid, senha)
             st.success(f"✅ {len(df)} registros exportados com sucesso!")
+            st.markdown(f"### 📊 Visualização dos {len(df)} primeiros registros")
             st.dataframe(df.head(100))
 
             with open(caminho_excel, "rb") as f:
-                st.download_button("📥 Baixar Excel", f, file_name="Extracao.xlsx")
+                st.download_button("📥 Baixar Excel", f, file_name="Extracao.xlsx", type="primary")
         else:
             st.warning("⚠️ Nenhum registro encontrado.")
