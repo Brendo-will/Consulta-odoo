@@ -89,13 +89,22 @@ def buscar_movimentacoes(uid, models, db, senha, modelo, domain, fields):
 def normalizar_registros(registros, models, db, uid, senha):
     campos_partner = ['parte_contraria_ids', 'parte_representada_ids', 'advogado_adverso_ids']
     todos_partner_ids = set()
+    dossie_ids_para_buscar = []
 
     for registro in registros:
         for campo in campos_partner:
             valor = registro.get(campo, [])
-            if isinstance(valor, list) and all(isinstance(v, int) for v in valor):
-                todos_partner_ids.update(valor)
+            if isinstance(valor, list) and all(isinstance(v, int) for v in valor) and valor:
+                primeiro_id = valor[0]
+                todos_partner_ids.add(primeiro_id)
+                registro[campo] = primeiro_id  # já atribui o primeiro ID
 
+        # Coletar o ID do dossie para buscar os processos relacionados
+        dossie_id = registro.get("id")
+        if dossie_id:
+            dossie_ids_para_buscar.append(dossie_id)
+
+    # Buscar nomes dos parceiros (apenas os primeiros IDs)
     partner_id_to_name = {}
     if todos_partner_ids:
         partner_nomes = models.execute_kw(
@@ -105,6 +114,21 @@ def normalizar_registros(registros, models, db, uid, senha):
         )
         partner_id_to_name = {p['id']: p['name'] for p in partner_nomes}
 
+    # Buscar processos relacionados (apenas o primeiro)
+    dossie_id_to_relacionados = {}
+    for dossie_id in dossie_ids_para_buscar:
+        relacionados = models.execute_kw(
+            db, uid, senha,
+            'dossie.processo.relacionado', 'search_read',
+            [[('dossie_id', '=', dossie_id)]],
+            {'fields': ['name'], 'limit': 1}
+        )
+        if relacionados:
+            dossie_id_to_relacionados[dossie_id] = relacionados[0]['name']
+        else:
+            dossie_id_to_relacionados[dossie_id] = ""
+
+    # Substituir os campos
     for registro in registros:
         for chave, valor in registro.items():
             if isinstance(valor, list) and len(valor) == 2 and isinstance(valor[0], int):
@@ -112,12 +136,13 @@ def normalizar_registros(registros, models, db, uid, senha):
             elif isinstance(valor, list) and all(isinstance(v, list) and len(v) == 2 for v in valor):
                 nomes = [v[1] for v in valor]
                 registro[chave] = ", ".join(nomes)
+            elif isinstance(valor, int) and chave in campos_partner:
+                registro[chave] = partner_id_to_name.get(valor, str(valor))
             elif isinstance(valor, list) and all(isinstance(v, int) for v in valor):
-                if chave in campos_partner:
-                    nomes = [partner_id_to_name.get(v, str(v)) for v in valor]
-                    registro[chave] = ", ".join(nomes)
-                else:
-                    registro[chave] = ", ".join(str(v) for v in valor)
+                registro[chave] = ", ".join(str(v) for v in valor)
+
+        # Adicionar coluna com o nome do primeiro processo relacionado
+        registro['processos_relacionados'] = dossie_id_to_relacionados.get(registro.get("id"), "")
 
     return registros
 
