@@ -7,65 +7,32 @@ import json
 import time
 import csv
 import ast
-import sqlite3
 from dotenv import load_dotenv
 
-# Carregar variáveis do .env
 load_dotenv()
 path_down = os.getenv("CAMINHO_DOWNLOAD") or "."
 
 # Garante que a pasta de download exista
 os.makedirs(path_down, exist_ok=True)
 
-# Caminho do banco de dados SQLite
-DB_PATH = os.path.join(path_down, "filtros_odoo.db")
+# Caminho absoluto para o arquivo de filtros
+FILTROS_SALVOS_PATH = os.path.join(path_down, "filtros_salvos.json")
+print(f"📂 Filtros serão salvos em: {FILTROS_SALVOS_PATH}")
 
-# ---------------- Banco de Filtros (SQLite) ---------------- #
-def inicializar_banco():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS filtros_odoo (
-            nome TEXT PRIMARY KEY,
-            domain TEXT,
-            fields TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def carregar_filtros_salvos():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT nome, domain, fields FROM filtros_odoo')
-    rows = cursor.fetchall()
-    conn.close()
-    return {
-        nome: {"domain": json.loads(domain), "fields": json.loads(fields)}
-        for nome, domain, fields in rows
-    }
-
-def salvar_filtro(nome_filtro, domain, fields):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO filtros_odoo (nome, domain, fields)
-        VALUES (?, ?, ?)
-    ''', (nome_filtro, json.dumps(domain), json.dumps(fields)))
-    conn.commit()
-    conn.close()
-
-def excluir_filtro(nome_filtro):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM filtros_odoo WHERE nome = ?', (nome_filtro,))
-    conn.commit()
-    conn.close()
-
-# Inicializar banco
-inicializar_banco()
 
 # ---------------- Funções auxiliares ---------------- #
+def carregar_filtros_salvos():
+    if os.path.exists(FILTROS_SALVOS_PATH):
+        with open(FILTROS_SALVOS_PATH, "r") as f:
+            return json.load(f)
+    return {}
+
+def salvar_filtro(nome_filtro, domain, fields):
+    filtros = carregar_filtros_salvos()
+    filtros[nome_filtro] = {"domain": domain, "fields": fields}
+    with open(FILTROS_SALVOS_PATH, "w") as f:
+        json.dump(filtros, f, indent=4)
+
 def corrigir_entrada_json(texto):
     try:
         return json.loads(texto)
@@ -136,12 +103,14 @@ def normalizar_registros(registros, models, db, uid, senha):
             if isinstance(valor, list) and all(isinstance(v, int) for v in valor) and valor:
                 primeiro_id = valor[0]
                 todos_partner_ids.add(primeiro_id)
-                registro[campo] = primeiro_id
+                registro[campo] = primeiro_id  # já atribui o primeiro ID
 
+        # Coletar o ID do dossie para buscar os processos relacionados
         dossie_id = registro.get("id")
         if dossie_id:
             dossie_ids_para_buscar.append(dossie_id)
 
+    # Buscar nomes dos parceiros (apenas os primeiros IDs)
     partner_id_to_name = {}
     if todos_partner_ids:
         partner_nomes = models.execute_kw(
@@ -151,6 +120,7 @@ def normalizar_registros(registros, models, db, uid, senha):
         )
         partner_id_to_name = {p['id']: p['name'] for p in partner_nomes}
 
+    # Buscar processos relacionados (apenas o primeiro)
     dossie_id_to_relacionados = {}
     for dossie_id in dossie_ids_para_buscar:
         relacionados = models.execute_kw(
@@ -159,19 +129,25 @@ def normalizar_registros(registros, models, db, uid, senha):
             [[('dossie_id', '=', dossie_id)]],
             {'fields': ['name'], 'limit': 1}
         )
-        dossie_id_to_relacionados[dossie_id] = relacionados[0]['name'] if relacionados else ""
+        if relacionados:
+            dossie_id_to_relacionados[dossie_id] = relacionados[0]['name']
+        else:
+            dossie_id_to_relacionados[dossie_id] = ""
 
+    # Substituir os campos
     for registro in registros:
         for chave, valor in registro.items():
             if isinstance(valor, list) and len(valor) == 2 and isinstance(valor[0], int):
                 registro[chave] = valor[1]
             elif isinstance(valor, list) and all(isinstance(v, list) and len(v) == 2 for v in valor):
-                registro[chave] = ", ".join(v[1] for v in valor)
+                nomes = [v[1] for v in valor]
+                registro[chave] = ", ".join(nomes)
             elif isinstance(valor, int) and chave in campos_partner:
                 registro[chave] = partner_id_to_name.get(valor, str(valor))
             elif isinstance(valor, list) and all(isinstance(v, int) for v in valor):
                 registro[chave] = ", ".join(str(v) for v in valor)
 
+        # Adicionar coluna com o nome do primeiro processo relacionado
         registro['processos_relacionados'] = dossie_id_to_relacionados.get(registro.get("id"), "")
 
     return registros
@@ -182,6 +158,13 @@ def salvar_excel(registros, models, db, uid, senha):
     excel_path = "Extracao.xlsx"
     df.to_excel(excel_path, index=False)
     return excel_path, df
+
+def excluir_filtro(nome_filtro):
+    filtros = carregar_filtros_salvos()
+    if nome_filtro in filtros:
+        del filtros[nome_filtro]
+        with open(FILTROS_SALVOS_PATH, "w") as f:
+            json.dump(filtros, f, indent=4)
 
 # ---------------- Estado Inicial ---------------- #
 if "domain_input" not in st.session_state:
@@ -249,6 +232,7 @@ with st.form("form_config"):
                 st.session_state["filtro_selecionado"] = filtro_selecionado
                 st.session_state["aplicar_filtro"] = True
                 st.rerun()
+
 
 # ---------------- Execução ---------------- #
 if "processar" not in locals():
