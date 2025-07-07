@@ -12,7 +12,13 @@ from dotenv import load_dotenv
 load_dotenv()
 path_down = os.getenv("CAMINHO_DOWNLOAD") or "."
 
-FILTROS_SALVOS_PATH = "filtros_salvos.json"
+# Garante que a pasta de download exista
+os.makedirs(path_down, exist_ok=True)
+
+# Caminho absoluto para o arquivo de filtros
+FILTROS_SALVOS_PATH = os.path.join(path_down, "filtros_salvos.json")
+print(f"📂 Filtros serão salvos em: {FILTROS_SALVOS_PATH}")
+
 
 # ---------------- Funções auxiliares ---------------- #
 def carregar_filtros_salvos():
