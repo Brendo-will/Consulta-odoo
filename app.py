@@ -12,13 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 path_down = os.getenv("CAMINHO_DOWNLOAD") or "."
 
-# Garante que a pasta de download exista
-os.makedirs(path_down, exist_ok=True)
-
-# Caminho absoluto para o arquivo de filtros
-FILTROS_SALVOS_PATH = os.path.join(path_down, "filtros_salvos.json")
-print(f"📂 Filtros serão salvos em: {FILTROS_SALVOS_PATH}")
-
+FILTROS_SALVOS_PATH = "filtros_salvos.json"
 
 # ---------------- Funções auxiliares ---------------- #
 def carregar_filtros_salvos():
@@ -61,7 +55,7 @@ def logar_no_odoo(url, db, usuario, senha):
 def buscar_movimentacoes(uid, models, db, senha, modelo, domain, fields):
     try:
         offset = 0
-        limit = 500
+        limit = 1000
         todos_registros = []
         progresso = st.empty()
 
@@ -100,17 +94,15 @@ def normalizar_registros(registros, models, db, uid, senha):
     for registro in registros:
         for campo in campos_partner:
             valor = registro.get(campo, [])
-            if isinstance(valor, list) and all(isinstance(v, int) for v in valor) and valor:
-                primeiro_id = valor[0]
-                todos_partner_ids.add(primeiro_id)
-                registro[campo] = primeiro_id  # já atribui o primeiro ID
+            if isinstance(valor, list) and all(isinstance(v, int) for v in valor):
+                todos_partner_ids.update(valor)
 
         # Coletar o ID do dossie para buscar os processos relacionados
         dossie_id = registro.get("id")
         if dossie_id:
             dossie_ids_para_buscar.append(dossie_id)
 
-    # Buscar nomes dos parceiros (apenas os primeiros IDs)
+    # Buscar nomes dos parceiros
     partner_id_to_name = {}
     if todos_partner_ids:
         partner_nomes = models.execute_kw(
@@ -120,19 +112,17 @@ def normalizar_registros(registros, models, db, uid, senha):
         )
         partner_id_to_name = {p['id']: p['name'] for p in partner_nomes}
 
-    # Buscar processos relacionados (apenas o primeiro)
+    # Buscar processos relacionados para cada dossie
     dossie_id_to_relacionados = {}
     for dossie_id in dossie_ids_para_buscar:
         relacionados = models.execute_kw(
             db, uid, senha,
             'dossie.processo.relacionado', 'search_read',
             [[('dossie_id', '=', dossie_id)]],
-            {'fields': ['name'], 'limit': 1}
+            {'fields': ['name']}
         )
-        if relacionados:
-            dossie_id_to_relacionados[dossie_id] = relacionados[0]['name']
-        else:
-            dossie_id_to_relacionados[dossie_id] = ""
+        nomes = [r['name'] for r in relacionados]
+        dossie_id_to_relacionados[dossie_id] = ", ".join(nomes)
 
     # Substituir os campos
     for registro in registros:
@@ -142,15 +132,19 @@ def normalizar_registros(registros, models, db, uid, senha):
             elif isinstance(valor, list) and all(isinstance(v, list) and len(v) == 2 for v in valor):
                 nomes = [v[1] for v in valor]
                 registro[chave] = ", ".join(nomes)
-            elif isinstance(valor, int) and chave in campos_partner:
-                registro[chave] = partner_id_to_name.get(valor, str(valor))
             elif isinstance(valor, list) and all(isinstance(v, int) for v in valor):
-                registro[chave] = ", ".join(str(v) for v in valor)
+                if chave in campos_partner:
+                    nomes = [partner_id_to_name.get(v, str(v)) for v in valor]
+                    registro[chave] = ", ".join(nomes)
+                else:
+                    registro[chave] = ", ".join(str(v) for v in valor)
 
-        # Adicionar coluna com o nome do primeiro processo relacionado
+        # Adicionar coluna com os nomes dos processos relacionados
         registro['processos_relacionados'] = dossie_id_to_relacionados.get(registro.get("id"), "")
 
     return registros
+
+
 
 def salvar_excel(registros, models, db, uid, senha):
     registros = normalizar_registros(registros, models, db, uid, senha)
