@@ -1,4 +1,4 @@
-import os
+ import os
 import xmlrpc.client
 import traceback
 import pandas as pd
@@ -40,7 +40,6 @@ def corrigir_entrada_json(texto):
             except:
                 return None
 
-# ---------------- Conexão Odoo ---------------- #
 def logar_no_odoo(url, db, usuario, senha):
     try:
         common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common")
@@ -129,11 +128,32 @@ def salvar_excel(registros, models, db, uid, senha):
     df.to_excel(excel_path, index=False)
     return excel_path, df
 
-# ---------------- Layout da Página ---------------- #
+def excluir_filtro(nome_filtro):
+    filtros = carregar_filtros_salvos()
+    if nome_filtro in filtros:
+        del filtros[nome_filtro]
+        with open(FILTROS_SALVOS_PATH, "w") as f:
+            json.dump(filtros, f, indent=4)
+
+# ---------------- Estado Inicial ---------------- #
+if "domain_input" not in st.session_state:
+    st.session_state["domain_input"] = '[["estado_cliente", "=", "a"]]'
+if "fields_input" not in st.session_state:
+    st.session_state["fields_input"] = '["dossie_id", "processo", "fase_id"]'
+
+# --- Carregar filtros salvos e aplicar se necessário --- #
+filtros_disponiveis = carregar_filtros_salvos()
+
+if st.session_state.get("aplicar_filtro", False):
+    filtro_aplicado = st.session_state.get("filtro_selecionado")
+    if filtro_aplicado in filtros_disponiveis:
+        st.session_state["domain_input"] = filtros_disponiveis[filtro_aplicado]["domain"]
+        st.session_state["fields_input"] = filtros_disponiveis[filtro_aplicado]["fields"]
+    st.session_state["aplicar_filtro"] = False
+
+# ---------------- Layout ---------------- #
 st.set_page_config(page_title="Exportador Personalizado Odoo", layout="wide")
 st.title("🔐 Exportador Personalizado Odoo")
-
-filtros_disponiveis = carregar_filtros_salvos()
 
 with st.form("form_config"):
     st.subheader("🔧 Configurações de Conexão")
@@ -149,8 +169,8 @@ with st.form("form_config"):
     modelo_input = st.text_input("Modelo (ex: dossie.dossie)", value="dossie.dossie")
 
     with st.expander("📌 Parâmetros da Consulta"):
-        domain_input = st.text_area("Filtro", value='[["estado_cliente", "=", "a"]]')
-        fields_input = st.text_area("Campos", value='["dossie_id", "processo", "fase_id"]')
+        domain_input = st.text_area("Filtro", value=st.session_state["domain_input"], key="domain_input")
+        fields_input = st.text_area("Campos", value=st.session_state["fields_input"], key="fields_input")
 
     st.subheader("💾 Gerenciar Filtros Salvos")
     nome_filtro = st.text_input("Nome do Filtro para Salvar")
@@ -168,14 +188,28 @@ with st.form("form_config"):
 
     if filtros_disponiveis:
         filtro_selecionado = st.selectbox("📂 Carregar Filtro Salvo", list(filtros_disponiveis.keys()))
-        if st.form_submit_button("📌 Aplicar Filtro"):
-            domain_input = filtros_disponiveis[filtro_selecionado]["domain"]
-            fields_input = filtros_disponiveis[filtro_selecionado]["fields"]
-            st.experimental_rerun()
+        col_del, col_apl = st.columns([1, 1])
+
+        with col_del:
+            if st.form_submit_button("🗑️ Excluir Filtro Selecionado"):
+                excluir_filtro(filtro_selecionado)
+                st.success(f"Filtro '{filtro_selecionado}' excluído com sucesso!")
+                st.rerun()
+
+        with col_apl:
+            if st.form_submit_button("📌 Aplicar Filtro"):
+                st.session_state["filtro_selecionado"] = filtro_selecionado
+                st.session_state["aplicar_filtro"] = True
+                st.rerun()
+
+
+# ---------------- Execução ---------------- #
+if "processar" not in locals():
+    processar = False
 
 if processar:
-    domain = corrigir_entrada_json(domain_input)
-    fields = corrigir_entrada_json(fields_input)
+    domain = corrigir_entrada_json(st.session_state["domain_input"])
+    fields = corrigir_entrada_json(st.session_state["fields_input"])
 
     if domain is None or fields is None:
         st.error("❌ Erro ao interpretar domain ou fields. Verifique se estão em formato JSON.")
