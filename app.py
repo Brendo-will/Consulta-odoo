@@ -40,6 +40,7 @@ def corrigir_entrada_json(texto):
             except:
                 return None
 
+# ---------------- Conexão Odoo ---------------- #
 def logar_no_odoo(url, db, usuario, senha):
     try:
         common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common")
@@ -55,7 +56,7 @@ def logar_no_odoo(url, db, usuario, senha):
 def buscar_movimentacoes(uid, models, db, senha, modelo, domain, fields):
     try:
         offset = 0
-        limit = 1000
+        limit = 500
         todos_registros = []
         progresso = st.empty()
 
@@ -89,7 +90,6 @@ def buscar_movimentacoes(uid, models, db, senha, modelo, domain, fields):
 def normalizar_registros(registros, models, db, uid, senha):
     campos_partner = ['parte_contraria_ids', 'parte_representada_ids', 'advogado_adverso_ids']
     todos_partner_ids = set()
-    dossie_ids_para_buscar = []
 
     for registro in registros:
         for campo in campos_partner:
@@ -97,12 +97,6 @@ def normalizar_registros(registros, models, db, uid, senha):
             if isinstance(valor, list) and all(isinstance(v, int) for v in valor):
                 todos_partner_ids.update(valor)
 
-        # Coletar o ID do dossie para buscar os processos relacionados
-        dossie_id = registro.get("id")
-        if dossie_id:
-            dossie_ids_para_buscar.append(dossie_id)
-
-    # Buscar nomes dos parceiros
     partner_id_to_name = {}
     if todos_partner_ids:
         partner_nomes = models.execute_kw(
@@ -112,19 +106,6 @@ def normalizar_registros(registros, models, db, uid, senha):
         )
         partner_id_to_name = {p['id']: p['name'] for p in partner_nomes}
 
-    # Buscar processos relacionados para cada dossie
-    dossie_id_to_relacionados = {}
-    for dossie_id in dossie_ids_para_buscar:
-        relacionados = models.execute_kw(
-            db, uid, senha,
-            'dossie.processo.relacionado', 'search_read',
-            [[('dossie_id', '=', dossie_id)]],
-            {'fields': ['name']}
-        )
-        nomes = [r['name'] for r in relacionados]
-        dossie_id_to_relacionados[dossie_id] = ", ".join(nomes)
-
-    # Substituir os campos
     for registro in registros:
         for chave, valor in registro.items():
             if isinstance(valor, list) and len(valor) == 2 and isinstance(valor[0], int):
@@ -139,12 +120,7 @@ def normalizar_registros(registros, models, db, uid, senha):
                 else:
                     registro[chave] = ", ".join(str(v) for v in valor)
 
-        # Adicionar coluna com os nomes dos processos relacionados
-        registro['processos_relacionados'] = dossie_id_to_relacionados.get(registro.get("id"), "")
-
     return registros
-
-
 
 def salvar_excel(registros, models, db, uid, senha):
     registros = normalizar_registros(registros, models, db, uid, senha)
@@ -153,32 +129,11 @@ def salvar_excel(registros, models, db, uid, senha):
     df.to_excel(excel_path, index=False)
     return excel_path, df
 
-def excluir_filtro(nome_filtro):
-    filtros = carregar_filtros_salvos()
-    if nome_filtro in filtros:
-        del filtros[nome_filtro]
-        with open(FILTROS_SALVOS_PATH, "w") as f:
-            json.dump(filtros, f, indent=4)
-
-# ---------------- Estado Inicial ---------------- #
-if "domain_input" not in st.session_state:
-    st.session_state["domain_input"] = '[["estado_cliente", "=", "a"]]'
-if "fields_input" not in st.session_state:
-    st.session_state["fields_input"] = '["dossie_id", "processo", "fase_id"]'
-
-# --- Carregar filtros salvos e aplicar se necessário --- #
-filtros_disponiveis = carregar_filtros_salvos()
-
-if st.session_state.get("aplicar_filtro", False):
-    filtro_aplicado = st.session_state.get("filtro_selecionado")
-    if filtro_aplicado in filtros_disponiveis:
-        st.session_state["domain_input"] = filtros_disponiveis[filtro_aplicado]["domain"]
-        st.session_state["fields_input"] = filtros_disponiveis[filtro_aplicado]["fields"]
-    st.session_state["aplicar_filtro"] = False
-
-# ---------------- Layout ---------------- #
+# ---------------- Layout da Página ---------------- #
 st.set_page_config(page_title="Exportador Personalizado Odoo", layout="wide")
 st.title("🔐 Exportador Personalizado Odoo")
+
+filtros_disponiveis = carregar_filtros_salvos()
 
 with st.form("form_config"):
     st.subheader("🔧 Configurações de Conexão")
@@ -194,8 +149,8 @@ with st.form("form_config"):
     modelo_input = st.text_input("Modelo (ex: dossie.dossie)", value="dossie.dossie")
 
     with st.expander("📌 Parâmetros da Consulta"):
-        domain_input = st.text_area("Filtro", value=st.session_state["domain_input"], key="domain_input")
-        fields_input = st.text_area("Campos", value=st.session_state["fields_input"], key="fields_input")
+        domain_input = st.text_area("Filtro", value='[["estado_cliente", "=", "a"]]')
+        fields_input = st.text_area("Campos", value='["dossie_id", "processo", "fase_id"]')
 
     st.subheader("💾 Gerenciar Filtros Salvos")
     nome_filtro = st.text_input("Nome do Filtro para Salvar")
@@ -213,28 +168,14 @@ with st.form("form_config"):
 
     if filtros_disponiveis:
         filtro_selecionado = st.selectbox("📂 Carregar Filtro Salvo", list(filtros_disponiveis.keys()))
-        col_del, col_apl = st.columns([1, 1])
-
-        with col_del:
-            if st.form_submit_button("🗑️ Excluir Filtro Selecionado"):
-                excluir_filtro(filtro_selecionado)
-                st.success(f"Filtro '{filtro_selecionado}' excluído com sucesso!")
-                st.rerun()
-
-        with col_apl:
-            if st.form_submit_button("📌 Aplicar Filtro"):
-                st.session_state["filtro_selecionado"] = filtro_selecionado
-                st.session_state["aplicar_filtro"] = True
-                st.rerun()
-
-
-# ---------------- Execução ---------------- #
-if "processar" not in locals():
-    processar = False
+        if st.form_submit_button("📌 Aplicar Filtro"):
+            domain_input = filtros_disponiveis[filtro_selecionado]["domain"]
+            fields_input = filtros_disponiveis[filtro_selecionado]["fields"]
+            st.experimental_rerun()
 
 if processar:
-    domain = corrigir_entrada_json(st.session_state["domain_input"])
-    fields = corrigir_entrada_json(st.session_state["fields_input"])
+    domain = corrigir_entrada_json(domain_input)
+    fields = corrigir_entrada_json(fields_input)
 
     if domain is None or fields is None:
         st.error("❌ Erro ao interpretar domain ou fields. Verifique se estão em formato JSON.")
